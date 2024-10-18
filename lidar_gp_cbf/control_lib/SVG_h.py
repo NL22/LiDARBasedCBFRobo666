@@ -116,40 +116,38 @@ class OnlineSVMModel():
             self.data_Y = np.empty((0,))    # Initialize empty array for Y
             self.iter = np.empty((0,))      # Initialize iteration tracking array
 
-        # Process new data points
-        for i in range(len(new_X)):
-            x = new_X[i]
-            distance = np.linalg.norm(x)  # Assume new_X contains the distance or position
-            if distance >= sense_dist:  # No obstacle detected (infinite distance)
-                # Safe point, label as +1
-                y = 1
-                self.data_X = np.append(self.data_X, [x], axis=0)
-                self.data_Y = np.append(self.data_Y, y)
-                self.iter = np.append(self.iter, self.k)
+        # Check distance of datapoint
+        else:
+            # Check distance of datapoint
+            dis_to_mem=np.linalg.norm(self.data_X[:,0:2]-new_X[0:2], axis=1)
+            if min( dis_to_mem)> self.min_d_sample :
+                # Process new data point
+                distance = np.linalg.norm(x)  # Assume new_X contains the distance or position
+                if distance >= sense_dist:  # No obstacle detected (infinite distance)
+                    # Safe point, label as +1
+                    y = 1
+                    self.data_X = np.append(self.data_X, [x], axis=0)
+                    self.data_Y = np.append(self.data_Y, y)
+                    self.iter = np.append(self.iter, self.k)
+                else:
+                    # Obstacle detected, two points are generated: one unsafe and one safe
+                    # 1. Unsafe point (obstacle detected)
+                    self.data_X = np.append(self.data_X, [x], axis=0)
+                    self.data_Y = np.append(self.data_Y, -1)
+                    self.iter = np.append(self.iter, self.k)
+
+                    # 2. Safe point (just before the obstacle by safe_offset)
+                    safe_point = x * ((distance - safe_offset) / distance)
+                    self.data_X = np.append(self.data_X, [safe_point], axis=0)
+                    self.data_Y = np.append(self.data_Y, 1)
+                    self.iter = np.append(self.iter, self.k)
+                self.N=len(self.data_X)
             else:
-                # Obstacle detected, two points are generated: one unsafe and one safe
-                # 1. Unsafe point (obstacle detected)
-                self.data_X = np.append(self.data_X, [x], axis=0)
-                self.data_Y = np.append(self.data_Y, -1)
-                self.iter = np.append(self.iter, self.k)
+                #update label because a new data was detected near by
+                arg=np.argmin(dis_to_mem)
+                self.iter[arg]=self.k
 
-                # 2. Safe point (just before the obstacle by safe_offset)
-                safe_point = x * ((distance - safe_offset) / distance)
-                self.data_X = np.append(self.data_X, [safe_point], axis=0)
-                self.data_Y = np.append(self.data_Y, 1)
-                self.iter = np.append(self.iter, self.k)
-
-        # Sampling distance check
-        if self.data_X is not None:
-            # Checking sampling distance requirement
-            dis_to_mem = np.linalg.norm(self.data_X[:, 0:2] - new_X[0, 0:2], axis=1)
-            if min(dis_to_mem) > self.min_d_sample:
-                self.N = len(self.data_X)  # Update the number of data points
-            else:
-                # Update label if a new data point is detected nearby
-                arg = np.argmin(dis_to_mem)
-                self.iter[arg] = self.k  # Update iteration for this data point
-
+    def update_SVG(self):
         # Perform online learning using partial_fit after scaling
         if len(self.data_X) > 5:  # Ensure there are enough points before training
             if not self.initial_fit:
@@ -162,6 +160,7 @@ class OnlineSVMModel():
                 # Scale new data and fit incrementally
                 new_X_scaled = self.scaler.transform(new_X)
                 self.svm_model.partial_fit(new_X_scaled, new_Y.flatten())
+
 
     def get_h_value(self, t):
         """
@@ -220,6 +219,8 @@ class OnlineSVMModel():
         hgp_xq : np.array
             The value of the function h(x).
         """
+        # Learn from the collected data
+        update_SVG()
         # Get the actual value of h
         hsvm_xq = self.get_h_value(t)
         
@@ -288,7 +289,7 @@ class OnlineSVMModel():
         #print('iter',self.iter)
         #print('data',self.data_X)
         if self.N!=0: # Assign with data
-            self.hpg_map,_,_,_,_=self.get_cbf_safety_prediction(map_to_plot)
+            _,_,self.hpg_map=self.get_cbf_safety_prediction(map_to_plot)
             self._pl_dataset.set_data(self.data_X[:,0], self.data_X[:,1])
         else: # Reset map + assing current position to plot
             self.hpg_map=np.ones(len(map_to_plot))
