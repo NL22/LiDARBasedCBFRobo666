@@ -126,8 +126,12 @@ class Controller():
                 if sensing_data[j] < SceneSetup.sense_dist: 
                     #get the location of the detected obstacle edges 
                     edge_data_X=np.reshape(sensor_pos_data[j,0:2], (1,2))
-                    #edge_data_Y=np.array([[-2]])
-                    self.svm[i].set_new_data(edge_data_X, sense_dist=SceneSetup.sense_dist, safe_offset=0.05)
+                    edge_data_Y=np.array([[-2]])
+                    distance = sensing_data[j]
+                    self.svm[i].set_new_data(edge_data_X, sense_dist=distance, rob_pos=current_q_center, safe_offset=0.1)
+                #edge_data_X=np.reshape(sensor_pos_data[j,0:2], (1,2))
+                #edge_data_Y=np.array([[-2]])
+                #self.svm[i].set_new_data(edge_data_X, sense_dist=SceneSetup.sense_dist, safe_offset=0.05)
    
             # ------------------------------------------------
             # Implementation of Control
@@ -143,7 +147,7 @@ class Controller():
 
                 
             # for differentiability of the SVM model data set must be non empty
-            if self.svm[i].N == 0:
+            if self.svm[i].N < 5:
                 u=u_nom
                 h = np.array([[1]])
                 true_svm_h=h
@@ -152,7 +156,7 @@ class Controller():
                 # Construct CBF setup
                 self.cbf[i].reset_cbf()
                 '''____________________Compute Lidar-GP_CBF_________________''' 
-                svm_G, svm_h, true_svm_h =self.svm[i].get_cbf_safety_prediction(current_data_X, min(sensing_data))
+                svm_G, svm_h, true_svm_h =self.svm[i].get_cbf_safety_prediction(current_data_X)
                 # robot angle is not controlled
                 svm_G=np.append(svm_G,np.array([[0]]), axis=1)
                 if true_svm_h<0:
@@ -520,7 +524,7 @@ class SimulationCanvas():
             # Update trajectory trail
             trail_data_i = self.__drawn_2D.extract_robot_i_trajectory(i)
             self.__gp_pl_trail[i].set_data(trail_data_i[:,0], trail_data_i[:,1])
-            self.__gp_pl_pos[i].set_data(trail_data_i[0,0], trail_data_i[0,1])
+            self.__gp_pl_pos[i].set_data([trail_data_i[0,0]], [trail_data_i[0,1]])
 
         # get data from Log
         log_data, max_idx = self.log.get_all_data()

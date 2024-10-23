@@ -6,6 +6,8 @@ import warnings
 
 from sklearn.linear_model import SGDRegressor
 from sklearn.preprocessing import StandardScaler
+from sklearn.base import BaseEstimator, TransformerMixin
+
 
 PYSIM = True
 #PYSIM = False # for experiment or running via ROS
@@ -57,7 +59,7 @@ def relative_error(A,x,B):
 '''________________________ GP Reg _________________________________________'''
 
 class OnlineSVMModel():
-    def __init__(self, kernel_type='rbf', alpha=0.01, epsilon=0.1, min_d_sample=0.1, iter_mem=50, grid_size_plot=0.1, dh_dt=0.01):
+    def __init__(self, kernel_type='rbf', alpha=0.01, epsilon=0.01, min_d_sample=0.1, iter_mem=50, grid_size_plot=0.1, dh_dt=0.01):
         self.reset_data()
         self.min_d_sample = min_d_sample
         self.mem_num = iter_mem
@@ -65,9 +67,13 @@ class OnlineSVMModel():
         self.dh_dt = dh_dt
         self.safe_offset = 0.5
         # Initialize the SGD model with epsilon-insensitive loss for regression (SVM-like behavior)
-        self.svm_model = SGDRegressor(loss="epsilon_insensitive", alpha=alpha, epsilon=epsilon, learning_rate='constant', eta0=0.01)
+        self.svm_model = SGDRegressor(loss="epsilon_insensitive", alpha=alpha, epsilon=0.05, learning_rate='constant', eta0=0.01)
         self.scaler = StandardScaler()  # Add a scaler for feature scaling
         self.initial_fit = False  # To check if the model has been fitted at least once
+        self.__prediction_plot=None
+        self.init = False
+        self.init_map=True
+        self.set = False
 
 
     def reset_data(self):
@@ -79,23 +85,36 @@ class OnlineSVMModel():
         self.iter_mem = None
         
     def new_iter(self):
-        #update iteration number
-        self.k+=1
-        #go through recorded data and remove data that are older than iteration memory
-        if (self.N!=0):
-            forgetting_iters=list(range(self.k - self.mem_num, max(1, self.k - 2 * self.mem_num) - 1, -1))
-            mask = ~np.isin(self.iter, forgetting_iters)
-            self.iter= self.iter[mask]
-            self.data_Y= self.data_Y[mask]
-            self.data_X= self.data_X[mask]
-            #if data set is empty 
-            if len(self.data_X)==0:
-                self.data_X=None
-                self.data_Y= None
-                self.iter=None
-                self.N=0
+        # Update iteration number
+        self.k += 1
 
-    def set_new_data(self, new_X, new_Y=np.array([[-2]]), sense_dist=np.inf, safe_offset=0.05):
+        # If there's data, proceed with memory management
+        if self.N != 0:
+            # Calculate forgetting iterations (iterations we want to forget)
+            forgetting_iters = list(range(self.k - self.mem_num, max(1, self.k - 2 * self.mem_num) - 1, -1))
+            
+            # Create a mask for the elements in self.iter that we want to keep
+            mask = ~np.isin(self.iter, forgetting_iters)
+
+            # Ensure that mask, data_X, and data_Y are the same size
+            if mask.shape[0] == self.data_X.shape[0] and mask.shape[0] == self.data_Y.shape[0]:
+                # Apply the mask to retain only relevant data
+                self.iter = self.iter[mask]
+                self.data_Y = self.data_Y[mask]
+                self.data_X = self.data_X[mask]
+            else:
+                # Debugging info: Add a check to see what's happening
+                print(f"Mask shape: {mask.shape}, data_X shape: {self.data_X.shape}, data_Y shape: {self.data_Y.shape}")
+                raise ValueError("Mismatch between mask and data sizes. Skipping this iteration.")
+
+            # If after filtering, data becomes empty, reset the dataset
+            if len(self.data_X) == 0:
+                self.data_X = None
+                self.data_Y = None
+                self.iter = None
+                self.N = 0
+
+    def set_new_data(self, new_X, new_Y=np.array([[-1.0]]), sense_dist=np.inf,rob_pos=np.array([0,0,0]), safe_offset=0.4):
         """
         Update the SVM model with new sensor data, ensuring a minimum sampling distance.
         
@@ -112,35 +131,42 @@ class OnlineSVMModel():
         
         if self.data_X is None:
             # No previous data, so initialize with the new data
-            self.data_X = np.empty((0, 2))  # Initialize empty array for X
-            self.data_Y = np.empty((0,))    # Initialize empty array for Y
-            self.iter = np.empty((0,))      # Initialize iteration tracking array
+            self.data_X = new_X
+            self.data_Y = new_Y   # Initialize empty array for Y
+            self.iter = np.array([self.k])     # Initialize iteration tracking array
 
         # Check distance of datapoint
         else:
             # Check distance of datapoint
             dis_to_mem=np.linalg.norm(self.data_X[:,0:2]-new_X[0:2], axis=1)
-            if min( dis_to_mem)> self.min_d_sample :
+            if min(dis_to_mem)> self.min_d_sample :
                 # Process new data point
-                distance = np.linalg.norm(x)  # Assume new_X contains the distance or position
-                if distance >= sense_dist:  # No obstacle detected (infinite distance)
-                    # Safe point, label as +1
-                    y = 1
-                    self.data_X = np.append(self.data_X, [x], axis=0)
-                    self.data_Y = np.append(self.data_Y, y)
-                    self.iter = np.append(self.iter, self.k)
-                else:
-                    # Obstacle detected, two points are generated: one unsafe and one safe
-                    # 1. Unsafe point (obstacle detected)
-                    self.data_X = np.append(self.data_X, [x], axis=0)
-                    self.data_Y = np.append(self.data_Y, -1)
-                    self.iter = np.append(self.iter, self.k)
+                
+                # Obstacle detected, two points are generated: one unsafe and one safe
+                # 1. Unsafe point (obstacle detected)
+                self.data_X = np.append(self.data_X, new_X, axis=0)
+                self.data_Y = np.append(self.data_Y, -1.0)
+                self.iter = np.append(self.iter, self.k)
 
-                    # 2. Safe point (just before the obstacle by safe_offset)
-                    safe_point = x * ((distance - safe_offset) / distance)
-                    self.data_X = np.append(self.data_X, [safe_point], axis=0)
-                    self.data_Y = np.append(self.data_Y, 1)
-                    self.iter = np.append(self.iter, self.k)
+                # 2. Safe point (just before the obstacle by safe_offset)
+                # Calculate the direction vector from the obstacle to the robot
+                direction_vec = rob_pos[:2] - new_X
+                distance = np.linalg.norm(direction_vec)
+
+                if distance > 0:
+                    # Normalize the direction vector (unit vector)
+                    direction_vec = direction_vec / distance
+                    
+                    # Calculate the safe point by moving safe_offset units away from the obstacle
+                    safe_point = new_X + direction_vec * safe_offset
+                else:
+                    # In case the robot and obstacle positions are the same, just set safe point to the robot's position
+                    safe_point = rob_pos[:2]
+                self.data_X = np.append(self.data_X, safe_point, axis=0)
+                # Make distance to target value X 
+                self.data_Y = np.append(self.data_Y, +1.0)
+                self.iter = np.append(self.iter, self.k)
+
                 self.N=len(self.data_X)
             else:
                 #update label because a new data was detected near by
@@ -149,17 +175,20 @@ class OnlineSVMModel():
 
     def update_SVG(self):
         # Perform online learning using partial_fit after scaling
-        if len(self.data_X) > 5:  # Ensure there are enough points before training
+        if len(self.data_X) > 3:  # Ensure there are enough points before training
+            
             if not self.initial_fit:
                 # Fit scaler and SVM model for the first time
                 self.scaler.fit(self.data_X)
-                self.data_X = self.scaler.transform(self.data_X)
-                self.svm_model.partial_fit(self.data_X, self.data_Y)
+                new_X_scaled = self.scaler.transform(self.data_X)
+                self.svm_model.partial_fit(new_X_scaled, self.data_Y)
                 self.initial_fit = True
             else:
                 # Scale new data and fit incrementally
-                new_X_scaled = self.scaler.transform(new_X)
-                self.svm_model.partial_fit(new_X_scaled, new_Y.flatten())
+                self.scaler.partial_fit(self.data_X)
+                new_X_scaled = self.scaler.transform(self.data_X)
+                self.svm_model.partial_fit(new_X_scaled, self.data_Y.flatten())
+        
 
 
     def get_h_value(self, t):
@@ -168,48 +197,48 @@ class OnlineSVMModel():
         """
         return self.svm_model.predict(t)
 
-    def compute_gradient_numerical(self, t, epsilon=1e-5):
+    def compute_gradient(self, t, sigma):
         """
-        Compute the numerical gradient of h(x) with respect to x at point t.
-        
+        Computes gradient of RBF kernel utilizing the model's training points.
+
         Parameters:
         t : np.array
-            The point where we want to compute the gradient.
-        epsilon : float
-            Small value to compute the finite difference.
+            Input state position (x, y) where we want to compute the safety prediction.
+        sigma : float
+            Defines the width of the RBF kernel.
         
         Returns:
-        gradient : np.array
-            The gradient of the function h(x) at point t.
+        grad : np.array
+            The gradients of the RBF kernel with respect to position (x, y).
         """
-        t = np.array(t)
+        # Get the training data and the corresponding labels (weights)
+        support_vectors = self.data_X  # Training data points
+        labels = self.data_Y  # Labels associated with the training points
+        
+        # Initialize the gradient vector
         grad = np.zeros_like(t)
         
-        # Iterate through each dimension of t
-        for i in range(t.shape[1]):
-            t_plus = np.copy(t)
-            t_minus = np.copy(t)
+        # Loop over all training points
+        for i in range(len(support_vectors)):
+            t_i = support_vectors[i]  # Training point
+            alpha_i = labels[i]  # Label (can be used as a weight for each point)
             
-            # Slightly perturb the current dimension
-            t_plus[0, i] += epsilon
-            t_minus[0, i] -= epsilon
+            # Compute the RBF kernel between t and the training point t_i
+            K_ti_t = np.exp(-np.linalg.norm(t - t_i)**2 / (2 * sigma**2))
             
-            # Compute the finite difference for this dimension
-            h_plus = self.svm_model.predict(self.scaler.transform(t_plus))  # Scale inputs
-            h_minus = self.svm_model.predict(self.scaler.transform(t_minus))  # Scale inputs
-                
-            grad[0, i] = (h_plus - h_minus) / (2 * epsilon)
+            # Compute the gradient of the RBF kernel with respect to t
+            grad += alpha_i * (- (t - t_i) / sigma**2) * K_ti_t
         
-        return grad 
-
-    def get_cbf_safety_prediction(self, t, dis_f):
+        return grad
+    
+    def get_cbf_safety_prediction(self, t):
         """
         Compute the safety prediction using the SVM, returning both the value and the gradient of h.
         
         Parameters:
         t : np.array
             The input state (position, etc.) where we want to compute the safety prediction.
-        dis_f : Unused
+        
         
         Returns:
         gp_G : np.array
@@ -220,18 +249,37 @@ class OnlineSVMModel():
             The value of the function h(x).
         """
         # Learn from the collected data
-        update_SVG()
+        self.update_SVG()
         # Get the actual value of h
-        hsvm_xq = self.get_h_value(t)
+        hsvm_xq = np.array([[np.float64(1)]])
+        hsvm_xq[0,0] = self.get_h_value(t)[0]
         
         # Compute the numerical gradient of h with respect to the input t
-        svm_G = self.compute_gradient_numerical(t)
+        svm_G = self.compute_gradient(t, sigma= 1.0)
         
         # Compute the adjusted h value for safety constraints
         svm_h = hsvm_xq - self.dh_dt
         
         return svm_G, svm_h, hsvm_xq
     
+    def visualize_safety_boundary(self):
+        plt.figure()
+        # Visualize the decision boundary after each partial update
+        x_min, x_max = self.data_X[:, 0].min() - 0.1, self.data_X[:, 0].max() + 0.1
+        y_min, y_max = self.data_X[:, 1].min() - 0.1, self.data_X[:, 1].max() + 0.1
+        xx, yy = np.meshgrid(np.linspace(x_min, x_max, 100), np.linspace(y_min, y_max, 100))
+        
+        # Predict on the mesh grid
+        grid_points = np.c_[xx.ravel(), yy.ravel()]
+        h_values = self.svm_model.predict(self.scaler.transform(grid_points))
+        h_values = h_values.reshape(xx.shape)
+
+        plt.contourf(xx, yy, h_values, levels=np.linspace(-1, 1, 20), cmap=RdGn, alpha=0.5)
+        plt.scatter(self.data_X[:, 0], self.data_X[:, 1], c=self.data_Y, cmap=RdGn, edgecolors='k')
+        plt.colorbar()
+        plt.title("Safety Function Boundary")
+        plt.show()
+
     def main_kernel(self,a, b,c,d, hypers):
         """
         kernel BETWEEN inputs a,b  
@@ -288,12 +336,12 @@ class OnlineSVMModel():
         """ updating the map """
         #print('iter',self.iter)
         #print('data',self.data_X)
-        if self.N!=0: # Assign with data
+        if self.N>4: # Assign with data
             _,_,self.hpg_map=self.get_cbf_safety_prediction(map_to_plot)
             self._pl_dataset.set_data(self.data_X[:,0], self.data_X[:,1])
         else: # Reset map + assing current position to plot
             self.hpg_map=np.ones(len(map_to_plot))
-            self._pl_dataset.set_data(robot_pos[0], robot_pos[1])    
+            self._pl_dataset.set_data([robot_pos[0]], [robot_pos[1]])    
 
         self.h_val_toplot[is_computed] = self.hpg_map.T[0]
         # self.hpg_map,_,_,_,_=self.update_gp_computation(self.t_map)

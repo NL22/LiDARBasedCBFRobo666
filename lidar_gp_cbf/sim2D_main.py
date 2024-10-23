@@ -5,9 +5,12 @@ PYSIM = True
 #PYSIM = False # for experiment or running via ROS
 
 if PYSIM:
-    from scenarios.sim2D_obstacle_GP import FeedbackInformation, Controller, ControlOutput, SimSetup, SimulationCanvas
+    from scenarios.sim2D_obstacle_SVR_coords import FeedbackInformation, Controller, ControlOutput, SimSetup, SimulationCanvas
+    #from scenarios.sim2D_obstacle_GP import FeedbackInformation, Controller, ControlOutput, SimSetup, SimulationCanvas
 else:
-    from .scenarios.sim2D_obstacle_GP import FeedbackInformation, Controller, ControlOutput, SimSetup, SimulationCanvas
+    from .scenarios.sim2D_obstacle_SVR_coords import FeedbackInformation, Controller, ControlOutput, SimSetup, SimulationCanvas
+    #from scenarios.sim2D_obstacle_GP import FeedbackInformation, Controller, ControlOutput, SimSetup, SimulationCanvas
+
 
 class Simulate():
     def __init__(self):
@@ -31,7 +34,7 @@ class Simulate():
         
 
 def main():
-    print("start")    
+    print("start")     
     # Ìnitialize Simulation
     sim = Simulate()
 

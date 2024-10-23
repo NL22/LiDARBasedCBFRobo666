@@ -156,15 +156,10 @@ class GP():
         # hgp_xq=mpost+1.96*std 
         robot_rad = 0
         hgp_xq=mpost+1 -robot_rad
-
-        # We want to check sample buffer size
-        # If enough samples we run it through the SVM training
-        # 
             
             
         return  hgp_xq,alpha,kXX,ktt,ktX
 
-    # Need a function to extract the delta h
     def get_cbf_safety_prediction(self,t,dis_f):
         """ can be only computed for one state at a time """
         hgp_xq,alpha,kXX,ktt,ktX=self.update_gp_computation(t)   
@@ -262,7 +257,7 @@ class GP():
             self._pl_dataset.set_data(self.data_X[:,0], self.data_X[:,1])
         else: # Reset map + assing current position to plot
             self.hpg_map=np.ones(len(map_to_plot))
-            self._pl_dataset.set_data(robot_pos[0], robot_pos[1])    
+            self._pl_dataset.set_data([robot_pos[0]], [robot_pos[1]])    
 
         self.h_val_toplot[is_computed] = self.hpg_map.T[0]
         # self.hpg_map,_,_,_,_=self.update_gp_computation(self.t_map)
@@ -283,4 +278,3 @@ class GP():
                 axins1.xaxis.set_ticks_position("top")
                 # draw circle first time
                 self._pl_circle, = ax.plot(circle_data[:,0], circle_data[:,1], '--', color='gray')
-

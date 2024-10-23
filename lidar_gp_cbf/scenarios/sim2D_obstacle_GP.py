@@ -509,6 +509,7 @@ class SimulationCanvas():
         #     self.gp[i].sensed_pos=sensed_pos[self.gp[i].sensed_edge,0]
 
         __colorList = plt.rcParams['axes.prop_cycle'].by_key()['color']
+
         # update GP plot
         all_gp_class = control_input.get_gp_classes()
         for i in [0]: #range(SceneSetup.robot_num):
@@ -517,7 +518,7 @@ class SimulationCanvas():
             # Update trajectory trail
             trail_data_i = self.__drawn_2D.extract_robot_i_trajectory(i)
             self.__gp_pl_trail[i].set_data(trail_data_i[:,0], trail_data_i[:,1])
-            self.__gp_pl_pos[i].set_data(trail_data_i[0,0], trail_data_i[0,1])
+            self.__gp_pl_pos[i].set_data([trail_data_i[0,0]], [trail_data_i[0,1]])
 
         # get data from Log
         log_data, max_idx = self.log.get_all_data()
