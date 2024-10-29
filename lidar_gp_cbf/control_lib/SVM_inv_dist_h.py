@@ -82,7 +82,7 @@ class OnlineSVMModel():
         self.dh_dt = dh_dt
         self.safe_offset = 0.5
         # Initialize the SVR model with appropriate parameters
-        self.svm_model = SVR(kernel=kernel_type, C=1, epsilon=0.1, gamma=0.5)
+        self.svm_model = SVR(kernel=kernel_type, C=1, epsilon=0.05, gamma=0.5)
         self.scaler = StandardScaler()  # Add a scaler for feature scaling
         self.regr = make_pipeline(self.scaler, self.svm_model) # Add a pipeline for ease of use
         self.initial_fit = False
@@ -165,13 +165,13 @@ class OnlineSVMModel():
                         self.iter = np.append(self.iter, self.k)
 
                         # 2. Safe point (Far from obstacle)
-                        #safe_point = new_X + direction_vec * safe_offset  # Move safe_offset units away from the obstacle
-                        #self.data_X = np.append(self.data_X, safe_point, axis=0)
-                        #self.data_Y = np.append(self.data_Y, +1.0)  # Label as safe
-                        # self.iter = np.append(self.iter, self.k)
+                        safe_point = new_X + direction_vec * safe_offset  # Move safe_offset units away from the obstacle
+                        self.data_X = np.append(self.data_X, safe_point, axis=0)
+                        self.data_Y = np.append(self.data_Y, +1.0)  # Label as safe
+                        self.iter = np.append(self.iter, self.k)
                         # 2. Generate multiple safe points around the obstacle in a fixed pattern
-                        num_safe_points = 1  # You can adjust the number of safe points as needed
-                        angles = np.linspace(0, 2 * np.pi, num_safe_points, endpoint=False)
+                        num_safe_points = 5  # You can adjust the number of safe points as needed
+                        angles = np.linspace(0,np.pi/4, num_safe_points, endpoint=False)
 
                         # Create safe points uniformly distributed around the obstacle
                         for angle in angles:
@@ -230,7 +230,7 @@ class OnlineSVMModel():
             K_xi_x = np.exp(-np.linalg.norm(t - t_i)**2 / (2 * sigma**2))
             
             # Compute the gradient of the RBF kernel
-            grad += alpha_i * (- (t - t_i) / sigma**2) * K_xi_x
+            grad +=  -2*( (t - t_i) / sigma**2) * K_xi_x
         
         return grad
 
@@ -269,9 +269,10 @@ class OnlineSVMModel():
             # Compute the numerical gradient of h with respect to t[i]
             gradient = self.compute_gradient(t[i].reshape(1, -1), sigma=1.0)
             svm_G[i, :] = gradient  # Store the gradient
-            
+            #print(gradient.shape)
             # Compute the adjusted h value for safety constraints
-            svm_h[i, 0] = h_value - self.dh_dt
+            # why does this work?
+            svm_h[i, 0] = h_value - self.dh_dt#(gradient[0][0]-gradient[0][1])
         
         return svm_G, svm_h, hsvm_xq
     
