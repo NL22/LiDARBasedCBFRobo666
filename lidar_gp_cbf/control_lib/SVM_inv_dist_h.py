@@ -82,7 +82,8 @@ class OnlineSVMModel():
         self.dh_dt = dh_dt
         self.safe_offset = 0.5
         # Initialize the SVR model with appropriate parameters
-        self.svm_model = SVR(kernel=kernel_type, C=1, epsilon=0.05, gamma=0.5)
+        self.gamma = 0.1
+        self.svm_model = SVR(kernel=kernel_type, C=3, epsilon=0.01, gamma=self.gamma)
         self.scaler = StandardScaler()  # Add a scaler for feature scaling
         self.regr = make_pipeline(self.scaler, self.svm_model) # Add a pipeline for ease of use
         self.initial_fit = False
@@ -90,11 +91,15 @@ class OnlineSVMModel():
         self.init = False
         self.init_map=True
         self.set = False
-
+        self.trained = False
+        self.data_X_art = np.empty((0, 2))  # Artificial data points
+        self.data_Y_art = np.empty((0,))    # Labels for artificial data
 
     def reset_data(self):
         self.data_X = None
         self.data_Y = None
+        self.data_X_art = None
+        self.data_Y_art = None
         self.N = 0
         self.k = 0
         self.iter = None
@@ -118,8 +123,42 @@ class OnlineSVMModel():
             if len(self.data_X) == 0:
                 self.data_X = None
                 self.data_Y = None
+                self.data_X_art = None
+                self.data_Y_art = None
                 self.iter = None
                 self.N = 0
+
+    def create_bubble(self, point, num_of_points, radius):
+        """
+        Create a 'bubble' of points around a world point to generate an unsafe perimiter around a point
+
+        Parameters:
+        point : np.array
+            the world coordinate ie center of the bubble
+        num_of_points : int
+            the number of points around the center point
+        radius : float
+            the radius of the bubble
+        """
+        # Initialize array to store the points
+        arc_points = []
+
+        # Angle increment for each point
+        angle_increment = 2 * np.pi / num_of_points
+
+        # Generate the circle of points
+        for i in range(num_of_points):
+            angle = i * angle_increment
+            # Calculate x and y coordinates
+            x = point[0,0] + radius * np.cos(angle)
+            y = point[0,1] + radius * np.sin(angle)
+            arc_points.append([x, y])
+
+        # Convert list to numpy array
+        arc_points = np.array(arc_points)
+        return arc_points
+
+
 
     def set_new_data(self, new_X, new_Y=np.array([[-1.0]]), dist=np.inf,sense_dist=np.inf,rob_pos=np.array([0,0,0]), safe_offset=0.2):
         """
@@ -137,10 +176,22 @@ class OnlineSVMModel():
         """
         
         if self.data_X is None:
-            # No previous data, so initialize with the new data
-            self.data_X = new_X
-            self.data_Y = new_Y   # Initialize empty array for Y
-            self.iter = np.array([self.k])     # Initialize iteration tracking array
+            if dist >= sense_dist:
+
+                # No previous data, so initialize with the new data
+                self.data_X = new_X
+                self.data_Y = 1.0  # Initialize empty array for Y
+                self.iter = np.array([self.k])     # Initialize iteration tracking array
+            else:
+                # Direction towards the point from roboto
+                direction_vec = rob_pos[:2] - new_X
+                distance = np.linalg.norm(direction_vec)
+                direction_vec = direction_vec / distance # Normalize the direction vector
+                            
+                label = (distance*4)-1
+                self.data_X = new_X
+                self.data_Y = label   # Initialize empty array for Y
+                self.iter = np.array([self.k])     # Initialize iteration tracking array
 
         # Check the distance of the new data point
         else:
@@ -148,37 +199,50 @@ class OnlineSVMModel():
             #if min(dis_to_mem) > self.min_d_sample:
                 # If the distance is larger than sensing distance, it is safe
             if dist >= sense_dist:
-                        self.data_X = np.append(self.data_X, new_X, axis=0)
-                        self.data_Y = np.append(self.data_Y, +1.0)
-                        self.iter = np.append(self.iter, self.k)
-            else:
-                        # Obstacle detected, two points are generated: one unsafe and one safe
-
-                        # Direction towards the point from roboto
-                        direction_vec = rob_pos[:2] - new_X
-                        distance = np.linalg.norm(direction_vec)
-                        direction_vec = direction_vec / distance
-                            
-                        # 1. Unsafe point (Obstacle detected)
-                        self.data_X = np.append(self.data_X, new_X, axis=0)
-                        self.data_Y = np.append(self.data_Y, -1.0)  # Label as unsafe
-                        self.iter = np.append(self.iter, self.k)
-
-                        # 2. Safe point (Far from obstacle)
-                        safe_point = new_X + direction_vec * safe_offset  # Move safe_offset units away from the obstacle
-                        self.data_X = np.append(self.data_X, safe_point, axis=0)
-                        self.data_Y = np.append(self.data_Y, +1.0)  # Label as safe
-                        self.iter = np.append(self.iter, self.k)
-                        # 2. Generate multiple safe points around the obstacle in a fixed pattern
-                        num_safe_points = 5  # You can adjust the number of safe points as needed
-                        angles = np.linspace(0,np.pi/4, num_safe_points, endpoint=False)
-
-                        # Create safe points uniformly distributed around the obstacle
-                        for angle in angles:
-                            safe_point = new_X - safe_offset * np.array([np.cos(angle), np.sin(angle)])  # Fixed offset circle
-                            self.data_X = np.append(self.data_X, safe_point, axis=0)
-                            self.data_Y = np.append(self.data_Y, +1.0)  # Label as safe
+                            self.data_X = np.append(self.data_X, new_X, axis=0)
+                            self.data_Y = np.append(self.data_Y, +0.5)
                             self.iter = np.append(self.iter, self.k)
+            else:
+                            # Obstacle detected, two points are generated: one unsafe and one safe
+
+                            # Direction towards the point from roboto
+                            direction_vec = rob_pos[:2] - new_X
+                            distance = np.linalg.norm(direction_vec)
+                            direction_vec = direction_vec / distance # Normalize the direction vector
+                            
+                            label = (distance*4)-1
+                            # 1. Unsafe point (Obstacle detected)
+                            self.data_X = np.append(self.data_X, new_X, axis=0)
+                            self.data_Y = np.append(self.data_Y, label)  # Label as unsafe
+                            self.iter = np.append(self.iter, self.k)
+
+                            # 2. arc points to create an envelope of safety
+                            #arc_points = self.create_bubble(new_X,8,0.05)
+                            #for arc_point in arc_points:
+                            #    arc_label =label-0.1
+                            #    self.data_X = np.append(self.data_X, np.reshape(arc_point, (1, 2)), axis=0)
+                            #    self.data_Y = np.append(self.data_Y, arc_label)  # Label as unsafe
+                            #    self.iter = np.append(self.iter, self.k)
+                            # Adding Gaussian noise-based uncertainty points
+                            
+                            # 3. add uncertain points for detected points 
+                            # Generate uncertainty points around the detected obstacle
+                            num_uncertainty_points = 3  # Number of uncertainty points to generate
+                            std_dev = 0.025  # Standard deviation for noise
+
+                            for _ in range(num_uncertainty_points):
+                                noise = np.random.normal(0, std_dev, size=2)
+                                uncertainty_point = new_X + noise
+
+                                # Calculate label for uncertainty point
+                                noise_distance = np.linalg.norm(rob_pos[:2]-uncertainty_point)
+                                uncertainty_label = (noise_distance*4)-1
+
+                                # Store artificial points separately
+                                self.data_X = np.append(self.data_X, uncertainty_point.reshape(1, 2), axis=0)
+                                self.data_Y = np.append(self.data_Y, uncertainty_label)
+                                self.iter = np.append(self.iter, self.k)
+
             self.N = len(self.data_X)
             #else:
                 # Update label if a new data point was detected nearby
@@ -188,10 +252,100 @@ class OnlineSVMModel():
     def update_SVG(self):
         # Perform batch learning
         if len(self.data_X) > 3:  # Ensure there are enough points before training
-                # Fit scaler and SVM model 
-                self.regr.fit(self.data_X, self.data_Y)
+            # Fit the SVM model with the current data
+            #print("Fitting the SVM model with the latest data...")
+            # Combine the real and artificial points for fitting
+            #combined_X = np.vstack((self.data_X, self.data_X_art))
+            #combined_Y = np.concatenate((self.data_Y, self.data_Y_art))
+            
+            # Fit your SVM model or any other classifier
+            #self.regr.fit(combined_X, combined_Y)
+            self.regr.fit(self.data_X, self.data_Y)
+
+            # Now call the plotting functions
+            print("Generating visualizations...")
+
+            # 1. Plot 1D learned safety function
+            #self.plot_learned_safety_function_1d()
+
+            # 2. Plot 2D learned safety function
+            #self.plot_learned_safety_function_2d()
+
+            # 3. Plot the support vectors
+            #self.plot_support_vectors()
+
+            # 4. Plot the gradient field of the safety function
+            #self.plot_gradient_field()
+
+            #print("Visualizations complete.")
                 
+
+    def plot_learned_safety_function_1d(self):
+        plt.figure()
         
+        # Generate a range of distances
+        distances = np.linspace(0, 5, 100).reshape(-1, 1)  # Adjust range as necessary
+        # Predict safety values using the trained model
+        h_values = self.regr.predict(distances)
+
+        plt.plot(distances, h_values, label='Learned Safety Function h(x)')
+        plt.axhline(y=0, color='r', linestyle='--', label='Decision Boundary (h(x)=0)')
+        plt.xlabel("Distance")
+        plt.ylabel("Safety Function h(x)")
+        plt.title("Learned Safety Function vs Distance")
+        plt.legend()
+        plt.show()
+    
+    def plot_learned_safety_function_2d(self):
+        plt.figure()
+
+        # Generate a mesh grid over the 2D space
+        x_min, x_max = self.data_X[:, 0].min() - 1, self.data_X[:, 0].max() + 1
+        y_min, y_max = self.data_X[:, 1].min() - 1, self.data_X[:, 1].max() + 1
+        xx, yy = np.meshgrid(np.linspace(x_min, x_max, 200), np.linspace(y_min, y_max, 200))
+
+        grid_points = np.c_[xx.ravel(), yy.ravel()]
+        # Predict the safety function values for each point on the grid
+        h_values = self.regr.predict(grid_points).reshape(xx.shape)
+
+        # Plot the safety function values
+        plt.contourf(xx, yy, h_values, levels=100, cmap=RdGn, alpha=0.8)
+        plt.colorbar(label='Safety Function h(x)')
+        plt.scatter(self.data_X[:, 0], self.data_X[:, 1], c=self.data_Y, cmap=RdGn, edgecolors='k')
+        plt.xlabel("X Position")
+        plt.ylabel("Y Position")
+        plt.title("2D Learned Safety Function and Decision Boundary")
+        plt.show()
+
+    def plot_support_vectors(self):
+        plt.figure()
+        support_vectors = self.svm_model.support_vectors_
+        plt.scatter(self.data_X[:, 0], self.data_X[:, 1], c=self.data_Y, cmap=RdGn, label="Training Data")
+        plt.scatter(support_vectors[:, 0], support_vectors[:, 1], facecolors='none', edgecolors='k', 
+                    linewidths=2, label="Support Vectors")
+        plt.xlabel("X Position")
+        plt.ylabel("Y Position")
+        plt.title("Support Vectors in Feature Space")
+        plt.legend()
+        plt.show()
+
+    def plot_gradient_field(self):
+        plt.figure()
+
+        grid_points = self.data_X
+        
+        # Calculate gradients
+        gradients = np.array([self.compute_gradient(pt.reshape(1, -1)) for pt in grid_points])
+        grad_x = gradients[:,:, 0]
+        grad_y = gradients[:,:, 1]
+
+        # Plot the gradient field
+        plt.quiver(self.data_X[:,0], self.data_X[:,1], grad_x, grad_y, color='blue', alpha=0.5)
+        plt.scatter(self.data_X[:, 0], self.data_X[:, 1], c=self.data_Y, cmap=RdGn, edgecolors='k')
+        plt.xlabel("X Position")
+        plt.ylabel("Y Position")
+        plt.title("Gradient Field of Safety Function")
+        plt.show()
 
     def get_h_value(self, t):
         """
@@ -199,38 +353,39 @@ class OnlineSVMModel():
         """
         #distances = self.distance_transformer.transform(t)
         
-        return self.regr.predict(t)
+        return self.svm_model.predict(t)
 
-    def compute_gradient(self, t, sigma):
+    def compute_gradient(self, t, sigma=1.0):
         """
-        Computes gradient of RBF kernel utilizing SVM's weights
-
+        Computes the gradient of the SVM decision function.
+        
         Parameters:
         t : np.array
-            Input state position(x,y) where we want to compute the safety prediction.
+            Input point where the gradient is to be calculated.
         sigma : float
-            Defines the width of the RBF kernel
+            Width parameter for the RBF kernel.
         
-        Return:
+        Returns:
         grad : np.array
-            the gradients of RBF kernel wrt to position(x,y)
+            Gradient of the decision function at point t.
         """
-        # Get the weifhts from the SVM model
+        # Get support vectors and dual coefficients
         support_vectors = self.svm_model.support_vectors_
-        dual_coef = self.svm_model.dual_coef_ 
-        # Initialize the gradient vector
+        dual_coef = self.svm_model.dual_coef_[0]
+        gamma = self.gamma
+        # Initialize the gradient
         grad = np.zeros_like(t)
-        #self.plot_safety_boundary()
-        # Loop over all support vectors
+        
+        # Iterate over all support vectors
         for i in range(len(support_vectors)):
-            t_i = support_vectors[i]  # Support vector
-            alpha_i = dual_coef[0, i]  # Dual coefficient for this support vector
+            sv = support_vectors[i]
+            alpha = dual_coef[i]
             
-            # Compute the kernel between t and the support vector t_i
-            K_xi_x = np.exp(-np.linalg.norm(t - t_i)**2 / (2 * sigma**2))
+            # Compute RBF kernel value
+            K_x_sv = np.exp(-gamma * np.linalg.norm(t - sv) ** 2)
             
-            # Compute the gradient of the RBF kernel
-            grad +=  -2*( (t - t_i) / sigma**2) * K_xi_x
+            # Compute the gradient of the prediction
+            grad += alpha * K_x_sv * (-2 * gamma * (t - sv))
         
         return grad
 
@@ -251,70 +406,26 @@ class OnlineSVMModel():
         hgp_xq : np.array
             The value of the function h(x).
         """
-        # Learn from the collected data
-        self.update_SVG()
-        n = t.shape[0]  # Number of input points (rows in t)
-    
-        # Initialize arrays to store h values and gradients
-        hsvm_xq = np.zeros((n, 1))  # Array for h values
-        svm_h = np.zeros((n, 1))    # Array for h values minus dh_dt
-        svm_G = np.zeros((n, t.shape[1]))  # Array for gradients, with the same dimensionality as t
-        
-        # Loop over all input points in t
+        # self.update_SVG()
+
+        # Initialize arrays for predictions
+        n = t.shape[0]
+        h_values = np.zeros((n, 1))
+        safety_margin_values = np.zeros((n, 1))
+        gradients = np.zeros((n, t.shape[1]))
+        grad_scaler = 10
+        # Iterate over all input points
         for i in range(n):
-            # Get the actual value of h for the current input t[i]
-            h_value = self.get_h_value(t[i].reshape(1, -1))[0]
-            hsvm_xq[i, 0] = h_value  # Store the h value
-            
-            # Compute the numerical gradient of h with respect to t[i]
-            gradient = self.compute_gradient(t[i].reshape(1, -1), sigma=1.0)
-            svm_G[i, :] = gradient  # Store the gradient
-            #print(gradient.shape)
-            # Compute the adjusted h value for safety constraints
-            # why does this work?
-            svm_h[i, 0] = h_value - self.dh_dt#(gradient[0][0]-gradient[0][1])
-        
-        return svm_G, svm_h, hsvm_xq
-    
-    def plot_h_wrt_distance(self):
-        plt.figure()
-    
-        distances = np.linspace(0, 1, 100).reshape(-1, 1)
-        h_values = self.regr.predict(distances)
-        
-        # Plot the relationship between distance and safety function h
-        plt.plot(distances, h_values)
-        plt.xlabel("Distanceeeeeeeeee")
-        plt.ylabel("Safety Function heeeeeeeeeee")
-        plt.title("Safety Function h vs Distanceeeeeeeeeeeeeee")
-        
-        # Show the new figure
-        plt.show()
+            h_value = self.get_h_value(t[i].reshape(1, -1))
+            gradient = self.compute_gradient(t[i].reshape(1, -1))*grad_scaler
 
-    def plot_safety_boundary(self):
-        # Create a new figure window explicitly
-        plt.figure()  # This ensures a new window is created for this plot
+            # Store the safety value and the gradient
+            h_values[i, 0] = h_value
+            gradients[i, :] = gradient
+            # Apply a small safety margin offset
+            safety_margin_values[i, 0] = h_value - self.dh_dt
 
-        # Create a meshgrid for the 2D space
-        x_min, x_max = self.data_X[:, 0].min() - 0.1, self.data_X[:, 0].max() + 0.1
-        y_min, y_max = self.data_X[:, 1].min() - 0.1, self.data_X[:, 1].max() + 0.1
-        xx, yy = np.meshgrid(np.linspace(x_min, x_max, 100), np.linspace(y_min, y_max, 100))
-        
-        # Predict the safety function h on the grid
-        grid_points = np.c_[xx.ravel(), yy.ravel()]
-        h_values = self.regr.predict(grid_points)
-        h_values = h_values.reshape(xx.shape)
-
-        # Plot the decision boundary and data points
-        plt.contourf(xx, yy, h_values, levels=[-1, 0, 1], cmap=RdGn, alpha=0.5)
-        plt.scatter(self.data_X[:, 0], self.data_X[:, 1], c=self.data_Y, cmap=RdGn, edgecolors='k')
-        plt.colorbar()
-        plt.xlabel("X")
-        plt.ylabel("Y")
-        plt.title("Safety Function Boundary with X, Y Coordinates")
-        
-        # Show the plot in the new figure window
-        plt.show()
+        return gradients, safety_margin_values, h_values
 
     def main_kernel(self,a, b,c,d, hypers):
         """
@@ -372,7 +483,7 @@ class OnlineSVMModel():
         """ updating the map """
         #print('iter',self.iter)
         #print('data',self.data_X)
-        if self.N>9: # Assign with data
+        if self.trained: # Assign with data
             _,_,self.hpg_map=self.get_cbf_safety_prediction(map_to_plot)
             self._pl_dataset.set_data(self.data_X[:,0], self.data_X[:,1])
         else: # Reset map + assing current position to plot
