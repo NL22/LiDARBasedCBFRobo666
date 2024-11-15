@@ -144,9 +144,10 @@ class Controller():
             #update SVM iteratio counter and forget old data
             self.svm[i].new_iter()
             #Saple detected edges
+            self.svm[i].trained = False
             #check if any obstacle is detected and collect with sampling distance min_dis constraint
             for j in range(360):
-                if sensing_data[j] < SceneSetup.sense_dist: 
+                if (sensing_data[j] < SceneSetup.sense_dist): 
                     #get the location of the detected obstacle edges 
                     #edge_data_X=np.reshape(sensor_pos_data[j,0:2], (1,2))
                     #edge_data_Y=np.array([[-2]])
@@ -154,8 +155,10 @@ class Controller():
                     edge_data_X=np.reshape(sensor_pos_data[j,0:2], (1,2))
                     #edge_data_Y=np.array([[-2]])
                     self.svm[i].set_new_data(edge_data_X, dist=sensing_data[j], sense_dist=SceneSetup.sense_dist, rob_pos= current_q_center)
-            #if(self.svm[i].data_X.lent()>3):
-                #self.svm[i].update_SVG()     
+                    if(sensing_data[j] < SceneSetup.sense_dist and len(self.svm[i].data_X) > 3):
+                        self.svm[i].trained = True
+            if(self.svm[i].trained):
+                self.svm[i].update_SVG()     
    
             # ------------------------------------------------
             # Implementation of Control
@@ -171,7 +174,7 @@ class Controller():
 
                 
             # for differentiability of the SVM model data set must be non empty
-            if self.svm[i].N < 10:
+            if(self.svm[i].trained == False):
                 u=u_nom
                 h = np.array([[1]])
                 true_svm_h=h
