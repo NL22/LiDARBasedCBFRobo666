@@ -11,7 +11,7 @@ if PYSIM:
     from nebolab_experiment_setup import NebolabSetup
     from control_lib.goToGoal import Pcontrol
     from control_lib.cbf_single_integrator import cbf_si
-    from control_lib.NeuranNet_h import SafetyNet
+    from control_lib.NeuranNetDist_h import SafetyNet
     from control_lib.CirculationEmbedded_CBF import CE
     from simulator.dynamics import Unicycle
     from simulator.plot_2D_unicycle import draw2DUnicyle
@@ -22,7 +22,7 @@ else:
     from ..nebolab_experiment_setup import NebolabSetup
     from ..control_lib.goToGoal import Pcontrol
     from ..control_lib.cbf_single_integrator import cbf_si
-    from ..control_lib.NeuranNet_h import SafetyNet
+    from ..control_lib.NeuranNetDist_h import SafetyNet
     from ..simulator.dynamics import Unicycle
     from ..simulator.plot_2D_unicycle import draw2DUnicyle
     from ..simulator.data_logger import dataLogger
@@ -148,7 +148,7 @@ class Controller():
             #check if any obstacle is detected and collect with sampling distance min_dis constraint
             for j in range(360):
                 #if sensing_data[j] < SceneSetup.sense_dist:
-                if (sensing_data[j] < SceneSetup.sense_dist or j%10 == 0):
+                if (sensing_data[j] < SceneSetup.sense_dist):
                     
                     # Get the world coordinates of the detected obstacle edge
                     x_obs_world = sensor_pos_data[j, 0]
@@ -172,12 +172,15 @@ class Controller():
                     distance = sensing_data[j]
                     normalized_distance = distance / SceneSetup.sense_dist
                     normalized_theta = (theta_obstacle + np.pi) / (2 * np.pi)  # Normalize angle to [0, 1]
-                    # Pass the local coordinates to the SVM model
-                    self.svm[i].set_new_data(new_X=normalized_distance, theta=normalized_theta )
+                    # we want to give the distances in x,y parts not normalized to give an idea of space
+        
+                    self.svm[i].set_new_data(rob_pos=np.reshape(np.array([x_robot,y_robot]),(1,2)),new_X=np.array([[dx,dy]]))
                     if (sensing_data[j] < SceneSetup.sense_dist and len(self.svm[i].data_X)>9):
                             self.svm[i].learn_threat = True                    
             if(self.svm[i].learn_threat):
-                self.svm[i].data_and_train()
+                x_robot = current_q_center[0]
+                y_robot = current_q_center[1]
+                self.svm[i].data_and_train(rob_pos=np.array([x_robot,y_robot]))
 
             # ------------------------------------------------
             # Implementation of Control
@@ -203,8 +206,8 @@ class Controller():
                 # Construct CBF setup
                 self.cbf[i].reset_cbf()
                 '''____________________Compute Lidar-GP_CBF_________________''' 
-                robot_data_x = self.svm[i].data_X
-                svm_G, svm_h, true_svm_h =self.svm[i].get_cbf_safety_prediction(robot_data_x, compute_controll = 0, robot_angle = feedback.get_robot_i_theta(i))
+                robot_data_x = np.array([[current_q_center[0],current_q_center[1]]])
+                svm_G, svm_h, true_svm_h =self.svm[i].get_cbf_safety_prediction(robot_data_x)
                 svm_h  = np.array([[np.mean(svm_h).item()]])
                 true_svm_h = np.array([[np.mean(true_svm_h).item()]])
                 svm_G = np.array([[np.mean(svm_G[:,0]).item(),np.mean(svm_G[:,1]).item()]])
@@ -570,6 +573,7 @@ class SimulationCanvas():
         # update GP plot
         all_gp_class = control_input.get_gp_classes()
         for i in [0]: #range(SceneSetup.robot_num):
+            
             all_gp_class[i].draw_gp_whole_map_prediction( 
                 self.__ax_gp[0], NebolabSetup.FIELD_X, NebolabSetup.FIELD_Y, i, feedback.get_robot_i_pos(i), feedback.get_robot_i_theta(i),SceneSetup.sense_dist, color=__colorList[i])
             # Update trajectory trail
