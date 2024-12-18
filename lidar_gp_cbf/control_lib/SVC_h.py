@@ -92,7 +92,7 @@ class OnlineSVMModel():
         self.svm_model = SVC(kernel=kernel_type, C=1, gamma=self.gamma, class_weight={-1:1, 1:1})
         self.svr = SVR(kernel='rbf', C=1.0, epsilon=0.1)
         self.scaler = StandardScaler()  # Add a scaler for feature scaling
-        self.regr = make_pipeline(self.scaler, self.svm_model) # Add a pipeline for ease of use
+        self.regr = make_pipeline(self.svm_model) # Add a pipeline for ease of use
         self.initial_fit = False
         self.__prediction_plot=None
         self.init = False
@@ -166,7 +166,7 @@ class OnlineSVMModel():
 
 
 
-    def set_new_data(self, new_X, new_Y=np.array([[-1.0]]), dist=np.inf,sense_dist=np.inf,rob_pos=np.array([0,0,0]), safe_offset=0.25, label_type = 'exponential'):
+    def set_new_data(self, new_X, new_Y=np.array([[-1.0]]), dist=np.inf,sense_dist=np.inf,rob_pos=np.array([0,0,0]), safe_offset=0.35, label_type = 'exponential'):
         """
         Update the SVM model with new sensor data, ensuring a minimum sampling distance.
         
@@ -474,7 +474,7 @@ class OnlineSVMModel():
             # Compute the gradient of the prediction
             grad += alpha * K_x_sv * (-2 * gamma * (t - sv))
         
-        return grad
+        return -grad
 
     def get_cbf_safety_prediction(self, t):
         """
@@ -500,13 +500,11 @@ class OnlineSVMModel():
         h_values = np.zeros((n, 1))
         safety_margin_values = np.zeros((n, 1))
         gradients = np.zeros((n, t.shape[1]))
-        grad_scaler = 10
+        grad_scaler = 1
         # Iterate over all input points
         for i in range(n):
             h_value_pred = self.get_h_value(t[i].reshape(1, -1))
             decision_values = self.svm_model.decision_function(t[i].reshape(1, -1))
-            max = np.sum(np.abs(decision_values))
-            normalized_values = np.abs(decision_values) / max
             #h_value = -1*normalized_values[0,0]+1*normalized_values[0,1]
             h_value = decision_values[0]
             gradient = self.compute_gradient(t[i].reshape(1, -1))*grad_scaler
