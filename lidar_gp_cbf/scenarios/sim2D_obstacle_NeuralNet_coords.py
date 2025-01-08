@@ -65,7 +65,7 @@ class SceneSetup():
     speed_limit = 0.15
     init_pos = np.array([[-1.45, 0.15, 0]])
     init_theta = np.array([[0]])
-    goal_pos = np.array([[1.3, 0.17, 0]])
+    goal_pos = np.array([[1.3, -0.5, 0]])
     obstacle = [0.4 * np.array([[1., 0., 0], [0.5, np.sqrt(3)/2, 0], [-0.5, np.sqrt(3)/2, 0],
                                 [-1., 0., 0], [-0.5, -np.sqrt(3)/2, 0], [0.5, -np.sqrt(3)/2, 0], [1.,  0., 0]])]
     default_range_data = sense_dist * np.ones((robot_num, 360))
@@ -147,7 +147,7 @@ class Controller():
             #Saple detected edges
             #check if any obstacle is detected and collect with sampling distance min_dis constraint
             for j in range(360):
-                if sensing_data[j] < SceneSetup.sense_dist or j%10 == 0: 
+                if (sensing_data[j] < SceneSetup.sense_dist): 
                     edge_data_X=np.reshape(sensor_pos_data[j,0:2], (1,2))
                     #edge_data_Y=np.array([[-2]])
                     self.svm[i].set_new_data(edge_data_X, dist=sensing_data[j], sense_dist=SceneSetup.sense_dist, rob_pos= current_q_center)
@@ -179,7 +179,7 @@ class Controller():
                 # Construct CBF setup
                 self.cbf[i].reset_cbf()
                 '''____________________Compute Lidar-GP_CBF_________________''' 
-                svm_G, svm_h, true_svm_h =self.svm[i].get_cbf_safety_prediction(current_data_X)
+                svm_G, svm_h, true_svm_h =self.svm[i].get_cbf_safety_prediction(np.array([[current_q_center[0],current_q_center[1]]]))
                 # robot angle is not controlled
                 svm_G=np.append(svm_G,np.array([[0]]), axis=1)
                 if true_svm_h<0:
