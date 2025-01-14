@@ -143,10 +143,10 @@ class SafetyNet():
             nn.ReLU(),
             nn.Linear(64, 128),
             nn.ReLU(),
+            nn.Dropout(p=0.3),
             nn.Linear(128, 64),
             nn.ReLU(),
             nn.Linear(64, 1),
-            nn.Tanh(),
 
         )
 
@@ -209,7 +209,7 @@ class SafetyNet():
     def normalize(self, x, y):
         return (x - self.mean_x) / (self.std_x + 1e-6), (y - self.mean_y) / (self.std_y + 1e-6)
     
-    def train_online(self, dataloader, epochs=10, max_grad_norm = 1, L = 0.075):
+    def train_online(self, dataloader, epochs=10, max_grad_norm = 1, L = 0.01):
         """
         Perform online training using mini-batch SGD.
         Input: dataloader - DataLoader object containing training data
@@ -227,18 +227,25 @@ class SafetyNet():
                 # Forward pass
                 predictions = self.forward(states_batch)
                 gradients = torch.autograd.grad(predictions.sum(), states_batch, create_graph=True, retain_graph= True)[0]
-                smoothness_loss = torch.mean((torch.sum(gradients**2, dim=1)))
+                smoothness_loss = smoothness_loss = torch.mean((torch.sum(gradients**2, dim=1))) / torch.mean(torch.abs(predictions))
                 # Convert logit values to -1 to +1
                 #safety_predictions = 2 * predictions - 1
                 #safety_values_batch = safety_values_batch.unsqueeze(1)
                 # Compute main loss
+                # Compute class weights
+                positive_weight = len(safety_values_batch) / (2 * torch.sum(safety_values_batch == 1))
+                negative_weight = len(safety_values_batch) / (2 * torch.sum(safety_values_batch == -1))
+
+                # Apply weights to the loss
+                weights = torch.where(safety_values_batch > 0, positive_weight, negative_weight)
+                weighted_loss = torch.mean(weights * (predictions - safety_values_batch) ** 2)
                 loss = self.criterion(predictions,safety_values_batch)
                 #loss = self.calculate_loss(predictions)
                 # Compute smoothness penalty
                 #smooth_loss = self.smoothness_regularization(torch.FloatTensor(self.data_X))
                 # Compute Lipschitz penalty
-
-                total_loss = loss + smoothness_loss*L
+                #L = 0.1 * weighted_loss.item()
+                total_loss = weighted_loss+smoothness_loss*L 
 
                 # Backward pass
                 total_loss.backward()
@@ -295,7 +302,7 @@ class SafetyNet():
         loss = self.train_online(dataloader)
             #print(f"Batch size: {self.data_X}, Epoch: {epoch+1}, Loss: {loss}")
         self.trained = True
-        if len(self.data_X)<0:
+        if len(self.data_X)<=0:
             self.trained= False
        
 
@@ -345,32 +352,47 @@ class SafetyNet():
         """
         
         if self.data_X is None:
-            # No previous data, so initialize with the new data
-            #self.data_X = new_X
-            #self.data_Y = +1.0   # Initialize empty array for Y
-            #self.iter = np.array([self.k])     # Initialize iteration tracking array
-            # Direction towards the point from roboto
-            direction_vec = rob_pos[:2] - new_X
-            distance = np.linalg.norm(direction_vec)
-            direction_vec = direction_vec / distance
-                            
-            # 1. Unsafe point (Obstacle detected)
-            self.data_X = new_X
-            self.data_Y = np.array([[-1.0]])  # Label as unsafe
-            self.iter = np.array([self.k]) 
+            if dist >= sense_dist:
+                # Direction towards the point from roboto
+                direction_vec = rob_pos[:2] - new_X
+                distance = np.linalg.norm(direction_vec)
+                direction_vec = direction_vec / distance # Normalize the direction vector
 
-            # 2. Safe point (offset from obstacle)
-            safe_point = new_X+(direction_vec*safe_offset)
-            self.data_X = np.append(self.data_X, safe_point, axis=0)
-            self.data_Y = np.append(self.data_Y, [[+1.0]], axis=0)  # Label as safe
-            self.iter = np.append(self.iter, self.k)        
+                pos_X = new_X + direction_vec*0.1
+                # No previous data, so initialize with the new data
+                self.data_X = pos_X
+                self.data_Y = [[1]]  # Initialize empty array for Y
+                self.iter = np.array([self.k])     # Initialize iteration tracking array
+            else:
+                # Direction towards the point from roboto
+                direction_vec = rob_pos[:2] - new_X
+                distance = np.linalg.norm(direction_vec)
+                direction_vec = direction_vec / distance # Normalize the direction vector
+
+                # Depending on label type distance will be calculated differently            
+                #label = (distance*4)-1
+                self.data_X = new_X
+                self.data_Y = [[-1]]   # Initialize empty array for Y
+                self.iter = np.array([self.k])     # Initialize iteration tracking array
+
+                # Positive point
+                pos_X = new_X + direction_vec*0.1
+                self.data_X = np.append(self.data_X, pos_X, axis=0)
+                self.data_Y = np.append(self.data_Y, [[1]], axis=0)   # Initialize empty array for Y
+                self.iter = np.append(self.iter, self.k)    # Initialize iteration tracking array
+            self.N = len(self.data_X)        
         # Check the distance of the new data point
         else:
             dis_to_mem = np.linalg.norm(self.data_X[:, 0:2] - new_X[0:2], axis=1)
             #if min(dis_to_mem) > self.min_d_sample:
                 # If the distance is larger than sensing distance, it is safe
             if dist >= sense_dist:
-                        self.data_X = np.append(self.data_X, new_X, axis=0)
+                        direction_vec = rob_pos[:2] - new_X
+                        distance = np.linalg.norm(direction_vec)
+                        direction_vec = direction_vec / distance # Normalize the direction vector
+                        
+                        pos_X = new_X + direction_vec*0.1
+                        self.data_X = np.append(self.data_X, pos_X, axis=0)
                         self.data_Y = np.append(self.data_Y, [[+1.0]], axis=0)
                         self.iter = np.append(self.iter, self.k)
             else:
@@ -471,7 +493,7 @@ class SafetyNet():
             svm_G[i, :] = gradient  # Store the gradient
             
             # Compute the adjusted h value for safety constraints
-            svm_h[i, 0] = h_value
+            svm_h[i, 0] = h_value -0.3
         
         return svm_G, svm_h, hsvm_xq
                 
