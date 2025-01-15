@@ -136,8 +136,8 @@ class PredictGPAnimation():
         # Extract data
         cur_data_X = self.__log['data_X_'+str(self.__i)][self.__cur_idx]
         cur_data_Y = self.__log['data_Y_'+str(self.__i)][self.__cur_idx]
-        cur_data_N = self.__log['data_N_'+str(self.__i)][self.__cur_idx]
-        cur_data_k = self.__log['data_k_'+str(self.__i)][self.__cur_idx]
+        #cur_data_N = self.__log['data_N_'+str(self.__i)][self.__cur_idx]
+        #cur_data_k = self.__log['data_k_'+str(self.__i)][self.__cur_idx]
         cur_data_iter = self.__log['data_iter_'+str(self.__i)][self.__cur_idx]
         cur_posc_x = self.__log['posc_x_'+str(self.__i)][self.__cur_idx]
         cur_posc_y = self.__log['posc_y_'+str(self.__i)][self.__cur_idx]
@@ -151,8 +151,8 @@ class PredictGPAnimation():
         # if cur_data_N > 0:
         self.gp.data_X = cur_data_X
         self.gp.data_Y = cur_data_Y
-        self.gp.N = cur_data_N
-        self.gp.k = cur_data_k
+        #self.gp.N = cur_data_N
+        #self.gp.k = cur_data_k
         self.gp.iter = cur_data_iter
         # update GP plot
         self.gp.draw_gp_whole_map_prediction( 
@@ -234,13 +234,13 @@ def scenario_pkl_plot():
         plt.rcParams['text.usetex'] = True
         # plot
         time_data = __stored_data['time'][:__end_idx]
-        u_x_data = __stored_data['u_x_'+str(robot_id)][:__end_idx]
-        u_y_data = __stored_data['u_y_'+str(robot_id)][:__end_idx]
-        u_norm_data = __stored_data['u_norm_'+str(robot_id)][:__end_idx]
+        #u_x_data = __stored_data['u_x_'+str(robot_id)][:__end_idx]
+        #u_y_data = __stored_data['u_y_'+str(robot_id)][:__end_idx]
+        #u_norm_data = __stored_data['u_norm_'+str(robot_id)][:__end_idx]
 
-        ax[0].plot(time_data, u_x_data, color='b', label='$u_x$')
-        ax[0].plot(time_data, u_y_data, color='r', label='$u_y$')
-        ax[1].plot(time_data, u_norm_data, color='b', label='$||u||$')
+        #ax[0].plot(time_data, u_x_data, color='b', label='$u_x$')
+        #ax[0].plot(time_data, u_y_data, color='r', label='$u_y$')
+        #ax[1].plot(time_data, u_norm_data, color='b', label='$||u||$')
         # adjust grid and time window
         ax[0].grid(True)
         ax[0].set(xlim= (time_data[0]-0.1, time_data[-1]+0.1))

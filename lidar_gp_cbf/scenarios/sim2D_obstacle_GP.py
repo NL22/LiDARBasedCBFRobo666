@@ -187,8 +187,8 @@ class Controller():
             # SAVING the data_X, data_Y and N for post processing
             computed_control.save_monitored_info( "data_X_"+str(i), self.gp[i].data_X )
             computed_control.save_monitored_info( "data_Y_"+str(i), self.gp[i].data_Y )
-            computed_control.save_monitored_info( "data_N_"+str(i), self.gp[i].N )
-            computed_control.save_monitored_info( "data_k_"+str(i), self.gp[i].k )
+            #computed_control.save_monitored_info( "data_N_"+str(i), self.gp[i].N )
+            #computed_control.save_monitored_info( "data_k_"+str(i), self.gp[i].k )
             # iteration number of each colected dasta respectively
             computed_control.save_monitored_info( "data_iter_"+str(i), self.gp[i].iter )
             # 
@@ -197,19 +197,24 @@ class Controller():
             computed_control.save_monitored_info( "posc_x_"+str(i), current_q_center[0] )
             computed_control.save_monitored_info( "posc_y_"+str(i), current_q_center[1] )
             # store GP h function and sensor's minimum readings (min distance to obstacle)
+            
             computed_control.save_monitored_info( "h_gp_"+str(i), true_gp_h[0,0] )
+            if self.gp[i].N != 0:
+                computed_control.save_monitored_info("dh_dt"+str(i),gp_G)
+            else:
+                computed_control.save_monitored_info("dh_dt"+str(i),None)
             computed_control.save_monitored_info( "min_lidar_"+str(i), min(SceneSetup.sense_dist,np.min(sensing_data)) )
             # Store computation time
-            computed_control.save_monitored_info( "run_time_"+str(i), end_time - start_time )
+            #computed_control.save_monitored_info( "run_time_"+str(i), end_time - start_time )
             # ------------------------------------------------
             computed_control.set_i_vel_xy(i, u[:2])
             # storing the rectified input
-            computed_control.save_monitored_info( "u_x_"+str(i), u[0] )
-            computed_control.save_monitored_info( "u_y_"+str(i), u[1] )
-            computed_control.save_monitored_info( "u_norm_"+str(i), np.linalg.norm(u) )
+            #computed_control.save_monitored_info( "u_x_"+str(i), u[0] )
+            #computed_control.save_monitored_info( "u_y_"+str(i), u[1] )
+            #computed_control.save_monitored_info( "u_norm_"+str(i), np.linalg.norm(u) )
             # store information to be monitored/plot
-            computed_control.save_monitored_info( "u_nom_x_"+str(i), u_nom[0] )
-            computed_control.save_monitored_info( "u_nom_y_"+str(i), u_nom[1] )
+            #computed_control.save_monitored_info( "u_nom_x_"+str(i), u_nom[0] )
+            #computed_control.save_monitored_info( "u_nom_y_"+str(i), u_nom[1] )
             computed_control.save_monitored_info( "pos_x_"+str(i), current_q[0] )
             computed_control.save_monitored_info( "pos_y_"+str(i), current_q[1] )
 
@@ -306,10 +311,10 @@ class FeedbackInformation():
 class SimSetup():
 
     Ts = 0.02 # in second. Determine Visualization and dynamic update speed
-    tmax =50 # simulation duration in seconds (only works when save_animate = True)
+    tmax =30 # simulation duration in seconds (only works when save_animate = True)
     save_animate = False # True: saving but not showing, False: showing animation but not real time
     save_data = True # log data using pickle
-    plot_saved_data = True
+    plot_saved_data = False # Set to false to make saving data faster.
 
     sim_defname = 'animation_result/sim2D_obstacle_GP/sim_'
     sim_fname_output = r''+sim_defname+'.gif'
@@ -536,6 +541,7 @@ class SimulationCanvas():
             time_span = log_data['time'][min_idx:max_idx]
             min_lidar_val = log_data["min_lidar_" + str(i)][min_idx:max_idx]
             h_val = log_data["h_gp_" + str(i)][min_idx:max_idx]
+            dh_dt_val = log_data["dh_dt"+str(i)][min_idx:max_idx]
 
             self.__pl_min_lidar[i].set_data(time_span, min_lidar_val)
             self.__pl_gp_cbf[i].set_data(time_span, h_val)
