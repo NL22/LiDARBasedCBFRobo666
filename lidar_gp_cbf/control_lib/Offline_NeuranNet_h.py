@@ -130,7 +130,7 @@ class SafetyNet():
         self.lstm_hidden_dim = 128
         # Define the neural network
         self.model = SafetyNN(input_dim, hidden_dim, output_dim)
-        self.model.load_state_dict(torch.load('/home/jesse/LiDARBasedCBFRobo666/lidar_gp_cbf/safety_nn_model.pth'))
+        self.model.load_state_dict(torch.load('/home/niilo/Documents/ROBO.666/LiDARBasedCBFRobo666/lidar_gp_cbf/safety_nn_model.pth'))
         #self.model = torch.load('/home/jesse/LiDARBasedCBFRobo666/lidar_gp_cbf/safety_nn_model.pth')
         # Define the architecture of the neural network with LSTM
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-4)
@@ -340,7 +340,7 @@ class SafetyNet():
             probabilities = self.forward(t)
             #h_value = 2 * probabilities - 1
             h_value = probabilities[0,0]
-            hsvm_xq[i, 0] = h_value.item()  # Store the h value
+            hsvm_xq[i, 0] = np.tanh(h_value.detach().numpy())  # Store the h value
             
             # Compute the numerical gradient of h with respect to t[i]
             #gradient = self.compute_gradient(torch.FloatTensor(t[i].reshape(1, -1)))
@@ -348,7 +348,8 @@ class SafetyNet():
             svm_G[i, :] = gradient # Store the gradient
             
             # Compute the adjusted h value for safety constraints
-            svm_h[i, 0] = h_value -0.3
+            # -dh/dt for corners 
+            svm_h[i, 0] = np.tanh(h_value.detach().numpy() -0.35)
         
         return svm_G, svm_h, hsvm_xq
                 

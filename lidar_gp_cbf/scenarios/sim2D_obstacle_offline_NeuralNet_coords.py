@@ -45,7 +45,7 @@ class SceneSetup():
     #init_pos =np.array([[-0.8,0.06, 0],[0.03,-0.8, 0],[0.8,0.06, 0],[0.08,0.8, 0]])
     init_theta = np.array([[0]])
     #init_theta = np.array([[0],[np.pi],[np.pi],[-np.pi/2]])
-    goal_pos = np.array([[1.3, -0.5,0]])
+    goal_pos = np.array([[1., -0.5,0]])
     #goal_pos =np.array([[0.8,0.06, 0],[0.08,0.8, 0],[-0.8,0.06, 0],[0.03,-0.8, 0]])
     # Here we assume any final pose is OK
     # Define Obstacles
@@ -65,7 +65,7 @@ class SceneSetup():
     speed_limit = 0.15
     init_pos = np.array([[-1.45, -0.25, 0]])
     init_theta = np.array([[0]])
-    goal_pos = np.array([[0.2, 0.5, 0]])
+    goal_pos = np.array([[2, 1.5, 0]])
     obstacle = [0.4 * np.array([[1., 0., 0], [0.5, np.sqrt(3)/2, 0], [-0.5, np.sqrt(3)/2, 0],
                                 [-1., 0., 0], [-0.5, -np.sqrt(3)/2, 0], [0.5, -np.sqrt(3)/2, 0], [1.,  0., 0]]),
                                 #np.array([[-1.0, 1.6 ,0], [-1.0, 0.8 ,0], [0.9, 0.8 ,0], [0.9, 1.6 ,0], [-1.0, 1.6 ,0]])
@@ -89,6 +89,14 @@ class SceneSetup():
     
     '''................GP Controller params.................................'''
     min_d_sample = 0.05 # Define the minimum distance GP sample
+
+    r = 0.3
+    circle_points = np.linspace(0,2*np.pi,1000)
+    #One circle
+    obstacle = [np.array([r*np.cos(circle_points)+0.5*np.ones(circle_points.shape),r*np.sin(circle_points)+0.5*np.ones(circle_points.shape)]).T,
+                np.array([r/2*np.cos(circle_points)+1*np.ones(circle_points.shape),r/2*np.sin(circle_points)+0.9*np.ones(circle_points.shape)]).T,
+                np.array([r/1.5*np.cos(circle_points),r/1.5*np.sin(circle_points)]).T]
+    #One circle
     #GP hyper parameters: l, sigma_f, sigma_y
     hypers_gp=np.array([[0.14,1,1e-2]]).T
     # GP exponential decay power
@@ -199,7 +207,7 @@ class Controller():
                 if true_svm_h<0:
                     print('the safety function is negative! increasec dh/dt in CBF constraint')
                 #
-                ('h_svm', svm_h)
+                #print(('h_svm', svm_h))
                 # Add GP-CF constraint
                 self.cbf[i].add_computed_constraint(svm_G, svm_h)
 
@@ -245,6 +253,8 @@ class Controller():
             computed_control.save_monitored_info( "min_lidar_"+str(i), min(SceneSetup.sense_dist,np.min(sensing_data)) )
             # Store computation time
             computed_control.save_monitored_info( "run_time_"+str(i), end_time - start_time )
+            #if end_time-start_time > 0.002:
+            print("runtime value: ", end_time-start_time)
             # ------------------------------------------------
             computed_control.set_i_vel_xy(i, u[:2])
             # storing the rectified input
@@ -549,8 +559,8 @@ class SimulationCanvas():
         for i in [0]:#range(SceneSetup.robot_num):
             sensed_pos = feedback.get_robot_i_detected_pos(i)
             self.__pl_sens[i].set_data(sensed_pos[:,0], sensed_pos[:,1])
-        # if self.gp[i].add_edge :
-        #     self.gp[i].sensed_pos=sensed_pos[self.gp[i].sensed_edge,0]
+        #if self.gp[i].add_edge :
+        #    self.gp[i].sensed_pos=sensed_pos[self.gp[i].sensed_edge,0]
 
         __colorList = plt.rcParams['axes.prop_cycle'].by_key()['color']
         # update GP plot
