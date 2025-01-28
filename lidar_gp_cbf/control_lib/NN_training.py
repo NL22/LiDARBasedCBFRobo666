@@ -7,6 +7,16 @@ from torch.utils.data import DataLoader, TensorDataset
 import random
 import numpy as np
 
+class GlobalStats:
+    def __init__(self):
+        self.min_x = float('inf')
+        self.max_x = float('-inf')
+        self.min_y = float('inf')
+        self.max_y = float('-inf')
+
+global_stats = GlobalStats()
+
+
 # Define the neural network
 class SafetyNN(nn.Module):
     def __init__(self, input_dim=74, hidden_dim=64, output_dim=4, padding_value=1e6):
@@ -45,6 +55,7 @@ class SafetyNN(nn.Module):
         x = self.fc2(x)
         return x  # Shape: [batch_size, output_dim]
 
+
 # Process data into fixed-size vectors
 def process_data(pos_x, pos_y, edge_detections, max_edges=36):
     """
@@ -58,11 +69,17 @@ def process_data(pos_x, pos_y, edge_detections, max_edges=36):
     # Shuffle edge detections
     if edge_detections is not None:
         localized_edges = edge_detections - np.array([pos_x,pos_y])
+        global_stats.min_x = min(global_stats.min_x, np.min(localized_edges[:, 0]))
+        global_stats.max_x = max(global_stats.max_x, np.max(localized_edges[:, 0]))
+        global_stats.min_y = min(global_stats.min_y, np.min(localized_edges[:, 1]))
+        global_stats.max_y = max(global_stats.max_y, np.max(localized_edges[:, 1]))
+
+
         padding = np.array([[1, 1]] * (max_edges - len(edge_detections)))
 
         # Stack the original detections and the padding
         padded_edges = np.vstack([localized_edges, padding])
-        random.shuffle(padded_edges)
+        #random.shuffle(padded_edges)
     else:
         padded_edges = np.array([[1, 1]]* (max_edges))
 
@@ -70,7 +87,7 @@ def process_data(pos_x, pos_y, edge_detections, max_edges=36):
     padded_edges = padded_edges[:max_edges]
 
     # Combine robot position and padded edges into a single vector
-    return np.vstack([robot_position, padded_edges])
+    return padded_edges
 
 def process_targets(targets):
     """
@@ -91,6 +108,7 @@ def process_targets(targets):
 # Load datasets from pickle files in a folder
 def load_datasets_from_folder(folder_path, max_edges=36):
     inputs = []
+    alphas = []
     targets = []
 
     for filename in os.listdir(folder_path):
@@ -106,26 +124,45 @@ def load_datasets_from_folder(folder_path, max_edges=36):
                 edge_detections = stored_data['data_X_0']
                 safety_values = stored_data['h_gp_0']
                 dh_values = stored_data['dh_dt0']
-
+                if '0' in filename:
+                    index = filename.find('0')
+                    alpha = float('0.'+filename[index+1:index+3])
+                else:
+                    alpha = 0.15
                 # Process and combine data
                 for px, py, edges, safety, dh in zip(pos_x, pos_y, edge_detections, safety_values, dh_values):
-                    input_vector = process_data(px, py, edges, max_edges)
-                    inputs.append(input_vector)
-                    if dh is not None:
-                        targets.append([safety, dh])
-                    else:
-                        targets.append([safety, np.array([[0.0,0.0,0.0]])])
+                        if dh is not None:
+                            input_vector = process_data(px, py, edges, max_edges)
+                            #flat = np.array(input_vector.reshape(-1))
+                            #flat = np.insert(flat,2,alpha)
+                            inputs.append(input_vector)
+                            alphas.append([alpha])
+                            dh_localized = dh-np.array([px,py,0.0])
+                            targets.append([safety, dh_localized])
+                        else:
+                            if safety is not None:
+                                input_vector = process_data(px, py, edges, max_edges)
+                                #flat = np.array(input_vector.reshape(-1))
+                                #flat = np.insert(flat,2,alpha)
+                                inputs.append(input_vector)
+                                alphas.append([alpha])
+                                targets.append([safety, np.array([[0.0,0.0,0.0]])])
     # Flatten inputs
-    flattened = np.array([input.reshape(-1) for input in inputs])
-
+    #flattened = np.array([input.reshape(-1) for input in inputs])
+    #flattened = np.insert(flattened,2,alpha)
+    # Normalize inputs 
+    normalized_data = (inputs - np.array([-0.5, -0.5])) / (np.array([0.5 - (-0.5), 0.5 - (-0.5)]))
     # Convert to PyTorch tensors
+    flattened = np.array([input.reshape(-1) for input in normalized_data])
     inputs = torch.tensor(flattened, dtype=torch.float32)
     targets = process_targets(targets)
-    return inputs, targets
+    alphas = torch.tensor(alphas)
+
+    return inputs, targets,torch.tensor(alphas)
 
 # Prepare the dataset
-def prepare_dataset(inputs, targets):
-    dataset = TensorDataset(inputs, targets)
+def prepare_dataset(inputs, alphas, targets):
+    dataset = TensorDataset(inputs, alphas,targets)
     return dataset
 
 # Initialize weights
@@ -140,11 +177,14 @@ def validate(model, dataloader, criterion):
     model.eval()  # Set the model to evaluation mode
     total_loss = 0
     with torch.no_grad():  # Disable gradient computation for validation
-        for inputs, targets in dataloader:
-            inputs = inputs.unsqueeze(-1)
-            inputs = torch.permute(inputs, (0, 2, 1))
-
-            outputs = model(inputs)
+        for inputs, alphas, targets in dataloader:
+            #inputs = inputs.unsqueeze(-1)
+            #inputs = torch.permute(inputs, (0, 2, 1))
+            alpha = alphas 
+            edge_points = inputs  # Remove the third value (shape: [batch_size, 74])
+            final_inputs=torch.cat((alpha,edge_points),dim=1).unsqueeze(1)
+            outputs = model(final_inputs)
+            outputs = model(final_inputs)
 
             # Create a mask for valid values in the target
             mask = ~torch.isnan(targets)
@@ -168,18 +208,23 @@ def mask_gradients(model, mask):
         if param.grad is not None:
             param.grad *= mask
 
+def composite_loss(output, target):
+    h_loss = nn.MSELoss()(output[:, 0], target[:, 0])  # `h` loss
+    grad_loss = nn.MSELoss()(output[:, 1:], target[:, 1:])  # Gradient loss
+    return h_loss + 1.0 * grad_loss  # Adjust the weight as needed
+
 # Training loop
 def train_safety_nn(model, dataloader, criterion, optimizer, num_epochs, val_dataloader, scheduler):
     model.train()
     for epoch in range(num_epochs):
         total_loss = 0
-        for inputs, targets in dataloader:
+        for inputs, alphas,targets in dataloader:
             optimizer.zero_grad()
-            inputs = inputs.unsqueeze(-1)
-            
-            inputs = torch.permute(inputs,(0,2,1))
-            
-            outputs = model(inputs)
+            alpha = alphas 
+            edge_points = inputs  # Remove the third value (shape: [batch_size, 74])
+            #edge_points = edge_points.unsqueeze(1)  # Add channel dimension for Conv1D (shape: [batch_size, 1, 74])
+            final_inputs=torch.cat((alpha,edge_points),dim=1).unsqueeze(1)
+            outputs = model(final_inputs)
             # Mask the outputs for padding values (outputs)
             output_mask = ~torch.isnan(outputs).any(dim=-1)  # Mask for NaN values in output
             target_mask = ~torch.isnan(targets).any(dim=-1)  # Mask for NaN values in target
@@ -191,7 +236,7 @@ def train_safety_nn(model, dataloader, criterion, optimizer, num_epochs, val_dat
             mask = mask.unsqueeze(-1).expand_as(outputs)  # Shape [32, 4] for batch size 32 and 4 features
 
             # Compute the loss with the mask
-            loss = masked_mse_loss(outputs, targets, mask)
+            loss = composite_loss(outputs, targets)
             
             if ~torch.isnan(loss):
                 loss.backward()
@@ -201,7 +246,10 @@ def train_safety_nn(model, dataloader, criterion, optimizer, num_epochs, val_dat
 
                 optimizer.step()
                 total_loss += loss.item()
-        scheduler.step()    
+        scheduler.step()
+        if epoch%10==0:
+            model_path = 'safety_nn_model_simple_full_norm_'+str(epoch)+'.pth'
+            torch.save(model.state_dict(),model_path)    
         print(f"Epoch {epoch+1}/{num_epochs}, Loss: {total_loss/len(dataloader):.4f}")
         print(f"Epoch {epoch+1}/{num_epochs}, Validation Loss: {validate(model,val_dataloader,criterion=criterion):.4f}")
 
@@ -212,23 +260,27 @@ def main():
     val_data_path = 'control_lib/SimData/Val_data'
 
     # Load data from all pickle files in the folder
-    inputs, targets = load_datasets_from_folder(train_data_path)
-    val_inputs,val_targets = load_datasets_from_folder(val_data_path)
+    inputs, targets, alphas = load_datasets_from_folder(train_data_path)
+    print("Global max x: "+str(global_stats.max_x))
+    print("Global min x: "+str(global_stats.min_x))
+    print("Global max y: "+str(global_stats.max_y))
+    print("Global min y: "+str(global_stats.min_y))
+    val_inputs,val_targets, alphas_val = load_datasets_from_folder(val_data_path)
     # Prepare dataset and dataloader
-    dataset = prepare_dataset(inputs, targets)
+    dataset = prepare_dataset(inputs, alphas, targets)
     dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
-    val_dataset = prepare_dataset(val_inputs,val_targets)
+    val_dataset = prepare_dataset(val_inputs, alphas_val, val_targets)
     val_dataloader = DataLoader(val_dataset,batch_size=32,shuffle=True)
     # Define model, loss function, and optimizer
-    input_dim = 74  # Fixed-size input vector
+    input_dim = 73  # Fixed-size input vector
     hidden_dim = 64
     output_dim = 4  # Output for [safety_value, dh]
 
     model = SafetyNN(input_dim, hidden_dim, output_dim)
     initialize_weights(model)
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.01)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
+    optimizer = optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-4)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
     # Train the model
     num_epochs = 50
@@ -237,6 +289,10 @@ def main():
     # Save the trained model
     torch.save(model.state_dict(), 'safety_nn_model.pth')
     print("Model training complete and saved.")
+    print("Global max x: "+str(global_stats.max_x))
+    print("Global min x: "+str(global_stats.min_x))
+    print("Global max y: "+str(global_stats.max_y))
+    print("Global min y: "+str(global_stats.min_y))
 
 if __name__ == "__main__":
     main()
